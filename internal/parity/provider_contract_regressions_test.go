@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -74,6 +75,10 @@ func TestProviderRegressionRequestParity(t *testing.T) {
 				t.Fatal("Python capture omitted the delivery outcome")
 			}
 			assertNotifySuccessMatches(t, pythonSuccess, err)
+			if strings.HasPrefix(tt.name, "mailersend/") {
+				normalizeMailerSendCopyOrder(t, pythonSpecs)
+				normalizeMailerSendCopyOrder(t, goSpecs)
+			}
 			if tt.name == "postmark/copy-exclusions" {
 				normalizePostmarkCopyOrder(t, pythonSpecs)
 				normalizePostmarkCopyOrder(t, goSpecs)
@@ -114,5 +119,89 @@ func normalizePostmarkCopyOrder(t *testing.T, specs []notify.RequestSpec) {
 			t.Fatal(err)
 		}
 		specs[i].Body = string(data)
+	}
+}
+
+// Python MailerSend serializes Cc/Bcc sets in arbitrary order. Sort only those
+// captured arrays by the complete recipient object, retaining all fields and
+// duplicate entries; primary recipients, attachments and request order stay exact.
+func normalizeMailerSendCopyOrder(t *testing.T, specs []notify.RequestSpec) {
+	t.Helper()
+	for i := range specs {
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(specs[i].Body), &payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range []string{"cc", "bcc"} {
+			raw, exists := payload[field]
+			if !exists {
+				continue
+			}
+			var recipients []map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &recipients); err != nil {
+				t.Fatal(err)
+			}
+			if recipients == nil {
+				continue
+			}
+			objects := make([]json.RawMessage, len(recipients))
+			for j, recipient := range recipients {
+				data, err := json.Marshal(recipient)
+				if err != nil {
+					t.Fatal(err)
+				}
+				objects[j] = data
+			}
+			slices.SortFunc(objects, func(a, b json.RawMessage) int {
+				return strings.Compare(string(a), string(b))
+			})
+			data, err := json.Marshal(objects)
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload[field] = data
+		}
+		data, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		specs[i].Body = string(data)
+	}
+}
+
+func TestNormalizeMailerSendCopyOrderPreservesPayload(t *testing.T) {
+	specs := []notify.RequestSpec{
+		{
+			Method: "POST", URL: "https://api.mailersend.com/v1/email",
+			Headers: map[string]string{"Authorization": "Bearer exact-token", "X-Fixture": "First"},
+			Body:    `{"cc":[{"email":"copy@example.com","name":"Lower","meta":{"id":9007199254740993}},{"name":"Upper","email":"Copy@example.com"},{"email":"copy@example.com","name":"Lower","meta":{"id":9007199254740993}}],"bcc":[{"email":"hidden@example.com","name":"Second"},{"name":"First","email":"hidden@example.com"}],"to":[{"email":"two@example.com"},{"email":"one@example.com"}],"attachments":[{"filename":"second.txt"},{"filename":"first.txt"}],"subject":"Exact subject","text":"Exact body"}`,
+		},
+		{
+			Method: "POST", URL: "https://api.mailersend.com/v1/email",
+			Headers: map[string]string{"Authorization": "Bearer exact-token", "X-Fixture": "Second"},
+			Body:    `{"to":[{"email":"last@example.com"}],"subject":"Second request","cc":[],"bcc":null}`,
+		},
+	}
+	expected := []notify.RequestSpec{
+		{
+			Method: "POST", URL: "https://api.mailersend.com/v1/email",
+			Headers: map[string]string{"Authorization": "Bearer exact-token", "X-Fixture": "First"},
+			Body:    `{"cc":[{"email":"Copy@example.com","name":"Upper"},{"email":"copy@example.com","name":"Lower","meta":{"id":9007199254740993}},{"email":"copy@example.com","name":"Lower","meta":{"id":9007199254740993}}],"bcc":[{"email":"hidden@example.com","name":"First"},{"email":"hidden@example.com","name":"Second"}],"to":[{"email":"two@example.com"},{"email":"one@example.com"}],"attachments":[{"filename":"second.txt"},{"filename":"first.txt"}],"subject":"Exact subject","text":"Exact body"}`,
+		},
+		{
+			Method: "POST", URL: "https://api.mailersend.com/v1/email",
+			Headers: map[string]string{"Authorization": "Bearer exact-token", "X-Fixture": "Second"},
+			Body:    `{"to":[{"email":"last@example.com"}],"subject":"Second request","cc":[],"bcc":null}`,
+		},
+	}
+	normalizeMailerSendCopyOrder(t, specs)
+	assertRequestSpecSequenceMatches(t, expected, specs)
+	for i := range specs {
+		if specs[i].Method != expected[i].Method || specs[i].URL != expected[i].URL || !reflect.DeepEqual(specs[i].Headers, expected[i].Headers) {
+			t.Fatalf("request %d transport fields changed: %#v", i, specs[i])
+		}
+	}
+	if !strings.Contains(specs[0].Body, "9007199254740993") {
+		t.Fatal("recipient metadata lost integer precision")
 	}
 }

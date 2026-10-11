@@ -302,9 +302,19 @@ func (m *MatrixTarget) sendServer(body, title string, notifyType NotifyType, att
 			continue
 		}
 
-		// Only an encrypted room gets encrypted traffic; anywhere else the
-		// plaintext path is what upstream uses too.
-		if e2eeCapable && m.roomEncrypted(roomID) {
+		// Resolve state before sending any content. An indeterminate room
+		// fails independently, while confirmed plaintext rooms keep their
+		// existing delivery path.
+		var encrypted bool
+		if e2eeCapable {
+			var err error
+			encrypted, err = m.roomEncrypted(roomID)
+			if err != nil {
+				outcome.record(err)
+				continue
+			}
+		}
+		if encrypted {
 			if err := m.sendEncrypted(roomID, body, title); err != nil {
 				outcome.record(err)
 				continue

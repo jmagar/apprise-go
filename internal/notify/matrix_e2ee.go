@@ -142,25 +142,28 @@ func (m *MatrixTarget) fallbackKeys() (map[string]any, error) {
 	return map[string]any{fmt.Sprintf("signed_curve25519:%x", id[:5]): object}, nil
 }
 
-// roomEncrypted reports whether the server says the room is encrypted. The
-// answer is cached, since it changes rarely and costs a request.
-func (m *MatrixTarget) roomEncrypted(roomID string) bool {
-	key := "e2ee_room_enc_" + roomID
+// roomEncrypted caches only confirmed state. Lookup failures must not authorize
+// plaintext, and the new namespace excludes failure-derived legacy entries.
+func (m *MatrixTarget) roomEncrypted(roomID string) (bool, error) {
+	key := "e2ee_room_enc_v2_" + roomID
 
-	var cached bool
-	if storeGetJSON(m.store, key, &cached) {
-		return cached
+	var cached *bool
+	if storeGetJSON(m.store, key, &cached) && cached != nil {
+		return *cached, nil
 	}
 
-	// A 404 here means the room simply has no encryption state event.
-	ok, response, _ := m.fetch(
+	// A 404 confirms that the room has no encryption state event. Other
+	// errors and empty successful responses leave the state unknown.
+	ok, response, status := m.fetch(
 		fmt.Sprintf("/rooms/%s/state/m.room.encryption", url.PathEscape(roomID)),
 		nil, nil, http.MethodGet, "")
-	encrypted := ok && len(response) > 0
-
+	if status != http.StatusNotFound && (!ok || len(response) == 0) {
+		return false, fmt.Errorf("matrix e2ee: encryption state lookup failed (status %d)", status)
+	}
+	encrypted := status != http.StatusNotFound
 	_ = m.store.Set(key, encrypted, matrixE2EECacheTTL)
 
-	return encrypted
+	return encrypted, nil
 }
 
 // roomMemberDevices returns every device of every joined member, keyed by user

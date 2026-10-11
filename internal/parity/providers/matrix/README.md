@@ -29,3 +29,21 @@ Additional coverage:
   `internal/parity/matrix_setup_failure_test.go` compares two real sends to a
   local TLS fixture, including failed key upload, plaintext fallback, and
   successful key-upload retry.
+
+### Encryption-state lookup failure
+
+Once secure Matrix device-key setup succeeds, an error determining a room's
+encryption state fails that room before sending text, icons, or attachments.
+Only HTTP 404 confirms a plaintext room; a nonempty successful response takes
+the encrypted path. Transport/server/authentication failures and empty or
+malformed successful responses remain unknown and are retried on the next send.
+Other rooms continue and the notification reports the failed room.
+
+This is a deliberate security exception to Python Apprise 1.13.1, which caches
+failed state lookups as false and takes its plaintext path. Successful encrypted
+requests, confirmed 404 rooms, explicit plaintext transport, `e2ee=no`, and
+the existing account/key-setup fallback retain their contracts. The verified
+state cache uses a new namespace to exclude legacy failure-derived entries;
+confirmed states keep the existing seven-day expiry. Offline regressions in
+`matrix_encryption_state_test.go` cover failure/retry, no content before state
+confirmation, recovery, legacy/null cache entries, and mixed-room delivery.

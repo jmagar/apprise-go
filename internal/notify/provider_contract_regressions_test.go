@@ -100,3 +100,38 @@ func TestMailerSendCopyRecipientsAndReply(t *testing.T) {
 		}
 	}
 }
+
+func TestKookMissingTargetsRespectOptionalDelivery(t *testing.T) {
+	for _, destination := range []string{"", "/invalid-channel"} {
+		for _, optional := range []bool{false, true} {
+			flag := "no"
+			if optional {
+				flag = "yes"
+			}
+			url := "kook://bottoken123" + destination + "?optional=" + flag
+			t.Run(url, func(t *testing.T) {
+				parsed, err := ParseURL(url)
+				if err != nil {
+					t.Fatal(err)
+				}
+				target, err := NewKookTarget(parsed)
+				if err != nil {
+					t.Fatalf("missing destinations must fail delivery, not construction: %v", err)
+				}
+				if _, err := target.BuildRequest("body", "title", NotifyInfo); err == nil {
+					t.Fatal("missing destinations produced a request")
+				}
+				if err := target.Send("body", "title", NotifyInfo); err == nil {
+					t.Fatal("missing destinations reported successful delivery")
+				}
+				err = DispatchSendWithInput(target, parsed, "body", "title", "", NotifyInfo, nil)
+				if optional && err != nil {
+					t.Fatalf("optional delivery failure was propagated: %v", err)
+				}
+				if !optional && err == nil {
+					t.Fatal("required delivery failure was ignored")
+				}
+			})
+		}
+	}
+}

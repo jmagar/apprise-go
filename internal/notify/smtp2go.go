@@ -12,6 +12,19 @@ const smtp2goBatchSize = 100
 
 var smtp2goEmailRegex = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
+// Match the name and full-email captures in Apprise 1.13.1's GET_EMAIL_RE,
+// including Python's Unicode whitespace and case-insensitive ASCII ranges.
+// Reply fields use that parser; recipient normalization remains independent.
+const replyEmailWhitespace = "\\x09-\\x0d\\x1c-\\x20\\x{85}\\p{Z}"
+
+var replyEmailRegex = regexp.MustCompile(
+	"(?i)^(([" + replyEmailWhitespace + "\"']+)?(?P<name>[^:<'\"]+)?[:<" + replyEmailWhitespace + "'\"]+)?" +
+		"(?P<address>(([^+]+)\\+)?" +
+		"([a-zİı0-9_!#$%&*/=?%`{|}~^-]+(?:\\.[a-zİı0-9_!#$%&'*/=?%`{|}~^-]+)*)@" +
+		"((?:[a-zİı0-9](?:[a-zİı0-9_-]*[a-zİı0-9])?\\.)+" +
+		"[a-zİı0-9](?:[a-zİı0-9_-]*[a-zİı0-9])|[a-zİı0-9][a-zİı0-9_-]{5,}))[" + replyEmailWhitespace + "]*>?",
+)
+
 type SMTP2GoTarget struct {
 	apiKey   string
 	fromAddr string
@@ -273,12 +286,20 @@ func isSimpleEmail(value string) bool {
 	return smtp2goEmailRegex.MatchString(value)
 }
 
-// isEmailAddress reports whether the value is an address upstream's is_email
-// accepts, including the "Display Name <addr@host>" form that appears in
-// reply-to and from arguments.
-func isEmailAddress(value string) bool {
-	_, ok := normalizedEmailAddress(value)
-	return ok
+// Reply addresses use the pinned upstream parser's name and full-email
+// captures. Reject header line breaks before retaining either field.
+func parseReplyEmailEntry(value string) (emailEntry, bool) {
+	value = strings.TrimSpace(value)
+	if strings.ContainsAny(value, "\r\n") {
+		return emailEntry{}, false
+	}
+	matches := replyEmailRegex.FindStringSubmatch(value)
+	if matches == nil {
+		return emailEntry{}, false
+	}
+	name := strings.TrimRight(matches[replyEmailRegex.SubexpIndex("name")], " \t\r\n\v\f+")
+	address := matches[replyEmailRegex.SubexpIndex("address")]
+	return emailEntry{name: name, email: address}, true
 }
 
 // normalizedEmailAddress returns the addr@host portion accepted by the

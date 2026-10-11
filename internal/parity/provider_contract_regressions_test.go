@@ -27,6 +27,9 @@ func TestProviderRegressionRequestParity(t *testing.T) {
 		{"postmark/bracketed-copies", "postmark://apikey123:sender@example.com/one@example.com/two@example.com?cc=bad,%3Cone@example.com%3E&bcc=bad,%3Cblind@example.com%3E"},
 		{"postmark/copy-exclusions", "postmark://apikey123:sender@example.com/one@example.com/two@example.com?cc=bad,%3Ccopy@example.com%3E,%3Cone@example.com%3E,%3Cblind@example.com%3E&bcc=bad,%3Cblind@example.com%3E,%3Ctwo@example.com%3E"},
 		{"postmark/blind-copy-exclusions", "postmark://apikey123:sender@example.com/one@example.com?cc=bad,%3Cblind@example.com%3E,%3Cone@example.com%3E&bcc=bad,%3Cone@example.com%3E"},
+		{"mailersend/colon-and-duplicate-copies", "mailersend://apikey123:sender@example.com/one@example.com?cc=Ops%3Acopy@example.com,%3Ccopy@example.com%3E,Copy@example.com,One@example.com&bcc=Blind%3Ablind@example.com,%3Cblind@example.com%3E&reply=Reply%3Areply@example.com"},
+		{"postmark/case-sensitive-copy-exclusions", "postmark://apikey123:sender@example.com/one@example.com?cc=copy@example.com,One@example.com&bcc=Copy@example.com"},
+		{"postmark/no-valid-recipients", "postmark://apikey123:sender@example.com/invalid"},
 		{"kook/empty-required", "kook://bottoken123?optional=no"},
 		{"kook/empty-optional", "kook://bottoken123?optional=yes"},
 		{"kook/invalid-required", "kook://bottoken123/invalid-channel?optional=no"},
@@ -79,7 +82,7 @@ func TestProviderRegressionRequestParity(t *testing.T) {
 				normalizeMailerSendCopyOrder(t, pythonSpecs)
 				normalizeMailerSendCopyOrder(t, goSpecs)
 			}
-			if tt.name == "postmark/copy-exclusions" {
+			if strings.HasPrefix(tt.name, "postmark/") {
 				normalizePostmarkCopyOrder(t, pythonSpecs)
 				normalizePostmarkCopyOrder(t, goSpecs)
 			}

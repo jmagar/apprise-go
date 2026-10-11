@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import sys
+from typing import Any
 from urllib.parse import urlparse, unquote
 
 from cryptography.hazmat.primitives import hashes, padding
@@ -26,31 +27,34 @@ RECEIVER_USER = "@target:example.com"
 RECEIVER_DEVICE = "TARGETDEVICE"
 
 
-def b64(value):
+def b64(value: str) -> bytes:
     return base64.b64decode(value + "=" * (-len(value) % 4), validate=True)
 
 
-def public(seed, kind=x25519.X25519PrivateKey):
+def public(
+    seed: bytes,
+    kind: type[x25519.X25519PrivateKey] | type[ed25519.Ed25519PrivateKey] = x25519.X25519PrivateKey,
+) -> bytes:
     return kind.from_private_bytes(seed).public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
 
 
-def canonical(value):
+def canonical(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 
 
-def require(condition, message):
+def require(condition: object, message: str) -> None:
     if not condition:
         raise ValueError(message)
 
 
-def signed_object(value, user, device, signing):
+def signed_object(value: dict[str, Any], user: str, device: str, signing: bytes) -> None:
     require(set(value["signatures"]) == {user} and set(value["signatures"][user]) == {"ed25519:"+device}, "unexpected signatures")
     signature = value["signatures"][user]["ed25519:"+device]
     unsigned = {k:v for k,v in value.items() if k not in ("signatures", "unsigned")}
     ed25519.Ed25519PublicKey.from_public_bytes(signing).verify(b64(signature), canonical(unsigned))
 
 
-def varint(data, offset):
+def varint(data: bytes, offset: int) -> tuple[int, int]:
     value = shift = 0
     while offset < len(data) and shift < 64:
         byte = data[offset]
@@ -62,7 +66,7 @@ def varint(data, offset):
     raise ValueError("invalid protobuf integer")
 
 
-def fields(data):
+def fields(data: bytes) -> dict[int, int | bytes]:
     require(data and data[0] == 3, "invalid encrypted message version")
     result, offset = {}, 1
     while offset < len(data):
@@ -79,18 +83,18 @@ def fields(data):
     return result
 
 
-def hkdf(key, info, salt=None, length=80):
+def hkdf(key: bytes, info: bytes, salt: bytes | None = None, length: int = 80) -> bytes:
     return HKDF(algorithm=hashes.SHA256(), length=length, salt=salt, info=info).derive(key)
 
 
-def decrypt_cbc(ciphertext, keys):
+def decrypt_cbc(ciphertext: bytes, keys: bytes) -> bytes:
     decryptor = Cipher(algorithms.AES(keys[:32]), modes.CBC(keys[64:80])).decryptor()
     plaintext = decryptor.update(ciphertext)+decryptor.finalize()
     unpadder = padding.PKCS7(128).unpadder()
     return unpadder.update(plaintext)+unpadder.finalize()
 
 
-def decrypt_olm(message, identity):
+def decrypt_olm(message: str, identity: bytes) -> dict[str, Any]:
     outer = fields(b64(message))
     require(set(outer) == {1,2,3,4}, "unexpected pre-key fields")
     require(outer[1] == public(RECEIVER_OTK), "wrong recipient one-time key")
@@ -110,7 +114,7 @@ def decrypt_olm(message, identity):
     return json.loads(decrypt_cbc(parsed[4], keys))
 
 
-def decrypt_megolm(message, session_key, session_id):
+def decrypt_megolm(message: str, session_key: str, session_id: str) -> dict[str, Any]:
     key = b64(session_key)
     require(len(key) == 229 and key[0] == 2, "invalid Megolm session key")
     signing = key[133:165]
@@ -137,7 +141,7 @@ def decrypt_megolm(message, session_key, session_id):
     return json.loads(decrypt_cbc(parsed[2], keys))
 
 
-def normalize_requests(requests):
+def normalize_requests(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized = copy.deepcopy(requests)
     identity = signing = user = device = None
     sessions = {}

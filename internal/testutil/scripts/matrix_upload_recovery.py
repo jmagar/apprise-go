@@ -11,7 +11,7 @@ from apprise import AppriseAsset, NotifyType
 import capture_request
 
 
-def main():
+def main() -> None:
     # Trust only the fixture's certificate; retain normal HTTPS verification.
     os.environ["REQUESTS_CA_BUNDLE"] = sys.argv[2]
     capture_request.apply_store_fix()

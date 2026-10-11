@@ -186,10 +186,11 @@ func (t *TelegramTarget) SendWithAttachments(body, title string, notifyType Noti
 	for _, recipient := range t.targets {
 		if t.includeImage {
 			spec, err := t.buildImageSpec(recipient, notifyType)
-			if err != nil {
-				return err
+			// Automatic notification icons are optional in upstream. A missing
+			// asset or failed upload must not fail or retry delivered messages.
+			if err == nil {
+				_ = SendRequest(spec)
 			}
-			outcome.record(SendRequest(spec))
 		}
 		if caption == "" {
 			spec, err := t.buildSpec(message, recipient)

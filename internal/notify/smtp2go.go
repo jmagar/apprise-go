@@ -287,6 +287,8 @@ func normalizedEmailAddress(value string) (string, bool) {
 	value = strings.TrimSpace(value)
 	if open := strings.LastIndex(value, "<"); open != -1 && strings.HasSuffix(value, ">") {
 		value = strings.TrimSpace(value[open+1 : len(value)-1])
+	} else if colon := strings.Index(value, ":"); colon != -1 {
+		value = strings.TrimSpace(value[colon+1:])
 	}
 	return value, isSimpleEmail(value)
 }
@@ -295,12 +297,33 @@ func normalizedEmailAddress(value string) (string, bool) {
 // sending them to the provider or rejecting the whole notification.
 func validEmailRecipients(raw string) []string {
 	var recipients []string
+	seen := map[string]struct{}{}
 	for _, entry := range parseDelimitedList(raw) {
 		if address, ok := normalizedEmailAddress(entry); ok {
+			if _, duplicate := seen[address]; duplicate {
+				continue
+			}
+			seen[address] = struct{}{}
 			recipients = append(recipients, address)
 		}
 	}
 	return recipients
+}
+
+// filterExactEmailList preserves the case-sensitive sets used by Postmark.
+// Source addresses are already normalized and deduplicated by validEmailRecipients.
+func filterExactEmailList(source, remove []string, target string) []string {
+	excluded := map[string]struct{}{target: {}}
+	for _, address := range remove {
+		excluded[address] = struct{}{}
+	}
+	var result []string
+	for _, address := range source {
+		if _, skip := excluded[address]; !skip {
+			result = append(result, address)
+		}
+	}
+	return result
 }
 
 func init() {

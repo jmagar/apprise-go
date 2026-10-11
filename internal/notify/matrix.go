@@ -75,37 +75,8 @@ func NewMatrixTarget(target *ParsedURL) (*MatrixTarget, error) {
 		return nil, fmt.Errorf("missing host")
 	}
 
-	rooms := normalizeMatrixRooms(splitPath(target.Path))
-	if toValue := strings.TrimSpace(target.Query["to"]); toValue != "" {
-		rooms = append(rooms, normalizeMatrixRooms(parseDelimitedList(toValue))...)
-	}
-
-	user := strings.TrimSpace(target.User)
-	password := strings.TrimSpace(target.Password)
-	tokenQuery := strings.TrimSpace(target.Query["token"])
-	if tokenQuery != "" {
-		password = tokenQuery
-	}
-
-	mode := strings.ToLower(strings.TrimSpace(target.Query["mode"]))
-	if mode == "" && password == "" && len(rooms) == 0 {
-		mode = matrixModeT2Bot
-	}
-	if mode == matrixModeT2Bot {
-		password = strings.TrimSpace(host)
-		if tokenQuery != "" {
-			password = tokenQuery
-		}
-	}
-
-	if password == "" && user != "" {
-		password = user
-		user = ""
-	}
-
-	if mode == "" {
-		mode = matrixModeOff
-	}
+	rooms := matrixRoomsForURL(target)
+	user, password, mode := matrixCredentials(target, rooms)
 
 	switch mode {
 	case matrixModeOff, matrixModeMatrix, matrixModeSlack, matrixModeT2Bot, matrixModeHookshot:
@@ -154,14 +125,6 @@ func NewMatrixTarget(target *ParsedURL) (*MatrixTarget, error) {
 		discovery = false
 	}
 
-	// Upstream derives storage identity from the resolved credentials, including
-	// token= and the token-only user form. Do not share cached account/room state
-	// between tokens that are absent from the original URL's password field.
-	storeTarget := *target
-	storeTarget.Host = host
-	storeTarget.User, storeTarget.HasUser = user, user != ""
-	storeTarget.Password, storeTarget.HasPassword = password, password != ""
-
 	matrixTarget := &MatrixTarget{
 		host:          host,
 		port:          target.Port,
@@ -180,7 +143,7 @@ func NewMatrixTarget(target *ParsedURL) (*MatrixTarget, error) {
 		// Upstream defaults end-to-end encryption on; it only takes effect
 		// for rooms the server reports as encrypted.
 		e2ee:  parseBoolWithDefault(target.Query["e2ee"], true),
-		store: StoreFor(&storeTarget),
+		store: StoreFor(target),
 		hsreq: parseBoolWithDefault(target.Query["hsreq"], true),
 		webhookPath: func() string {
 			if raw := strings.TrimSpace(target.Query["path"]); raw != "" {
@@ -208,6 +171,47 @@ func NewMatrixTarget(target *ParsedURL) (*MatrixTarget, error) {
 	}
 
 	return matrixTarget, nil
+}
+
+func matrixRoomsForURL(target *ParsedURL) []string {
+	rooms := normalizeMatrixRooms(splitPath(target.Path))
+	if toValue := strings.TrimSpace(target.Query["to"]); toValue != "" {
+		rooms = append(rooms, normalizeMatrixRooms(parseDelimitedList(toValue))...)
+	}
+
+	return rooms
+}
+
+// matrixCredentials resolves URL credentials once for both delivery and storage IDs.
+func matrixCredentials(target *ParsedURL, rooms []string) (user, password, mode string) {
+	user = strings.TrimSpace(target.User)
+	password = strings.TrimSpace(target.Password)
+	tokenQuery := strings.TrimSpace(target.Query["token"])
+	if tokenQuery != "" {
+		password = tokenQuery
+	}
+
+	mode = strings.ToLower(strings.TrimSpace(target.Query["mode"]))
+	if mode == "" && password == "" && len(rooms) == 0 {
+		mode = matrixModeT2Bot
+	}
+	if mode == matrixModeT2Bot {
+		password = strings.TrimSpace(target.Host)
+		if tokenQuery != "" {
+			password = tokenQuery
+		}
+	}
+
+	if password == "" && user != "" {
+		password = user
+		user = ""
+	}
+
+	if mode == "" {
+		mode = matrixModeOff
+	}
+
+	return user, password, mode
 }
 
 func (m *MatrixTarget) BuildRequest(body, title string, notifyType NotifyType) (RequestSpec, error) {
@@ -251,12 +255,21 @@ func (m *MatrixTarget) sendServer(body, title string, notifyType NotifyType, att
 	if m.userID == "" {
 		ok, response, _ := m.fetch("/account/whoami", nil, nil, http.MethodGet, "")
 		if ok {
-			m.userID, _ = response["user_id"].(string)
-			m.deviceID, _ = response["device_id"].(string)
+			if userID, _ := response["user_id"].(string); userID != "" {
+				m.userID = userID
+			}
+			if deviceID, _ := response["device_id"].(string); deviceID != "" {
+				m.deviceID = deviceID
+			}
 		}
 	}
 	if m.homeServer == "" {
-		m.homeServer = m.host
+		if _, homeServer, ok := strings.Cut(m.userID, ":"); ok {
+			m.homeServer = homeServer
+		}
+		if m.homeServer == "" {
+			m.homeServer = m.host
+		}
 	}
 
 	rooms := m.rooms

@@ -47,6 +47,14 @@ func TestMatrixSetupFailureRequestParity(t *testing.T) {
 // TestMatrixKeyUploadRecoveryRequestParity compares two real Send calls against
 // a plaintext room: a failed key upload falls back, then the next Send retries.
 func TestMatrixKeyUploadRecoveryRequestParity(t *testing.T) {
+	testMatrixKeyUploadRecoveryRequestParity(t, false)
+}
+
+func TestMatrixWhoamiPreservesDeviceRequestParity(t *testing.T) {
+	testMatrixKeyUploadRecoveryRequestParity(t, true)
+}
+
+func testMatrixKeyUploadRecoveryRequestParity(t *testing.T, login bool) {
 	testutil.RequirePythonApprise(t)
 	var mu sync.Mutex
 	var requests []notify.RequestSpec
@@ -70,8 +78,14 @@ func TestMatrixKeyUploadRecoveryRequestParity(t *testing.T) {
 		})
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/login"):
+			_, _ = fmt.Fprint(w, `{"access_token":"token","device_id":"DEVICE"}`)
 		case strings.HasSuffix(r.URL.Path, "/account/whoami"):
-			_, _ = fmt.Fprint(w, `{"user_id":"@user:example.com","device_id":"DEVICE"}`)
+			if login {
+				_, _ = fmt.Fprint(w, `{"user_id":"@user:example.com"}`)
+			} else {
+				_, _ = fmt.Fprint(w, `{"user_id":"@user:example.com","device_id":"DEVICE"}`)
+			}
 		case strings.HasSuffix(r.URL.Path, "/keys/upload"):
 			uploads++
 			if uploads == 1 {
@@ -81,6 +95,9 @@ func TestMatrixKeyUploadRecoveryRequestParity(t *testing.T) {
 			}
 			_, _ = fmt.Fprint(w, `{"one_time_key_counts":{"signed_curve25519":10}}`)
 		case strings.Contains(r.URL.Path, "/join/"):
+			if !strings.HasSuffix(r.URL.Path, "/join/#alerts:example.com") {
+				t.Errorf("room was resolved against the API endpoint instead of account domain: %s", r.URL.Path)
+			}
 			_, _ = fmt.Fprint(w, `{"room_id":"!room:example.com"}`)
 		case strings.Contains(r.URL.Path, "/state/m.room.encryption"):
 			w.WriteHeader(http.StatusNotFound)
@@ -99,7 +116,11 @@ func TestMatrixKeyUploadRecoveryRequestParity(t *testing.T) {
 	if err := os.WriteFile(certPath, cert, 0600); err != nil {
 		t.Fatal(err)
 	}
-	url := "matrixs://token@" + strings.TrimPrefix(server.URL, "https://") + "/!room:example.com?discovery=no"
+	credentials := "token"
+	if login {
+		credentials = "user:password"
+	}
+	url := "matrixs://" + credentials + "@" + strings.TrimPrefix(server.URL, "https://") + "/alerts?discovery=no"
 	script := filepath.Join(testutil.RepoRoot(t), "internal/testutil/scripts/matrix_upload_recovery.py")
 	stdout, stderr, err := testutil.RunPythonScript(t, script, url, certPath)
 	if err != nil {

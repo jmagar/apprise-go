@@ -20,7 +20,8 @@ func TestProviderRegressionRequestParity(t *testing.T) {
 	}{
 		{"mailersend/copy-and-reply", "mailersend://apikey123:user@example.com?cc=bad,copy@example.com&bcc=bad,blind@example.com&reply=user@example.com"},
 		{"mailersend/bracketed-copies", "mailersend://apikey123:user@example.com/one@example.com/two@example.com?cc=bad,%3Ccopy@example.com%3E,%3Cone@example.com%3E&bcc=bad,%3Cblind@example.com%3E&reply=Reply%20Name%20%3Cuser@example.com%3E"},
-		{"postmark/bracketed-copies", "postmark://apikey123:sender@example.com/one@example.com/two@example.com?cc=bad,%3Ccopy@example.com%3E,%3Cone@example.com%3E&bcc=bad,%3Cblind@example.com%3E"},
+		{"postmark/bracketed-copies", "postmark://apikey123:sender@example.com/one@example.com/two@example.com?cc=bad,%3Cone@example.com%3E&bcc=bad,%3Cblind@example.com%3E"},
+		{"postmark/blind-copy-exclusions", "postmark://apikey123:sender@example.com/one@example.com?cc=bad,%3Cblind@example.com%3E,%3Cone@example.com%3E&bcc=bad,%3Cone@example.com%3E"},
 		{"kook/empty-required", "kook://bottoken123?optional=no"},
 		{"kook/empty-optional", "kook://bottoken123?optional=yes"},
 		{"kook/invalid-required", "kook://bottoken123/invalid-channel?optional=no"},

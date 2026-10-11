@@ -110,6 +110,40 @@ func TestMailerSendCopyRecipientsAndReply(t *testing.T) {
 	}
 }
 
+func TestPostmarkCopiesExcludeCurrentRecipient(t *testing.T) {
+	parsed, err := ParseURL("postmark://token:sender@example.com/one@example.com/two@example.com?cc=bad,<copy@example.com>,<one@example.com>,<blind@example.com>&bcc=bad,<blind@example.com>,<two@example.com>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := NewPostmarkTarget(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	specs, err := target.buildRequests("body", "title", NotifyInfo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 2 {
+		t.Fatalf("expected both primary recipients: got %d messages", len(specs))
+	}
+	for i, want := range []struct {
+		to  string
+		cc  string
+		bcc string
+	}{
+		{"one@example.com", "copy@example.com", "blind@example.com,two@example.com"},
+		{"two@example.com", "copy@example.com,one@example.com", "blind@example.com"},
+	} {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(specs[i].Body), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["To"] != want.to || payload["Cc"] != want.cc || payload["Bcc"] != want.bcc {
+			t.Fatalf("copy exclusions for %s: got To=%v Cc=%v Bcc=%v", want.to, payload["To"], payload["Cc"], payload["Bcc"])
+		}
+	}
+}
+
 func TestKookMissingTargetsRespectOptionalDelivery(t *testing.T) {
 	for _, destination := range []string{"", "/invalid-channel"} {
 		for _, optional := range []bool{false, true} {

@@ -151,11 +151,11 @@ func (p *PostmarkTarget) buildRequests(body, title string, notifyType NotifyType
 		} else {
 			payload["TextBody"] = body
 		}
-		if len(p.cc) > 0 {
-			payload["Cc"] = strings.Join(p.cc, ",")
+		if cc := filterEmailList(p.cc, p.bcc, recipient); len(cc) > 0 {
+			payload["Cc"] = strings.Join(cc, ",")
 		}
-		if len(p.bcc) > 0 {
-			payload["Bcc"] = strings.Join(p.bcc, ",")
+		if bcc := filterEmailList(p.bcc, nil, recipient); len(bcc) > 0 {
+			payload["Bcc"] = strings.Join(bcc, ",")
 		}
 		if len(attachments) > 0 {
 			payload["Attachments"] = attachmentsPostmarkStyle(attachments)

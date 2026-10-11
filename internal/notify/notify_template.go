@@ -82,7 +82,14 @@ func renderNotifyTemplateWithImageURL(
 
 func validateWebhookTemplate(payload map[string]any) error {
 	content, _ := payload["content"].(string)
-	embeds, _ := payload["embeds"].([]any)
+	var embeds []any
+	if raw, present := payload["embeds"]; present {
+		var ok bool
+		embeds, ok = raw.([]any)
+		if !ok {
+			return fmt.Errorf("webhook template embeds must be an array")
+		}
+	}
 	if content == "" && len(embeds) == 0 {
 		return fmt.Errorf("webhook template requires non-empty content or embeds")
 	}

@@ -43,8 +43,13 @@ func NewMailerSendTarget(target *ParsedURL) (*MailerSendTarget, error) {
 
 	// Upstream validates the reply-to address and raises rather than dropping
 	// it; see the note in brevo.go.
-	if replyTo := strings.TrimSpace(target.Query["reply"]); replyTo != "" && !isEmailAddress(replyTo) {
-		return nil, fmt.Errorf("invalid reply-to address: %q", replyTo)
+	replyTo := strings.TrimSpace(target.Query["reply"])
+	if replyTo != "" {
+		address, ok := normalizedEmailAddress(replyTo)
+		if !ok {
+			return nil, fmt.Errorf("invalid reply-to address: %q", replyTo)
+		}
+		replyTo = address
 	}
 
 	targets := splitPath(target.Path)
@@ -65,7 +70,7 @@ func NewMailerSendTarget(target *ParsedURL) (*MailerSendTarget, error) {
 	return &MailerSendTarget{
 		apikey:    apikey,
 		fromEmail: fromEmail,
-		replyTo:   strings.TrimSpace(target.Query["reply"]),
+		replyTo:   replyTo,
 		targets:   targets,
 		cc:        validEmailRecipients(target.Query["cc"]),
 		bcc:       validEmailRecipients(target.Query["bcc"]),

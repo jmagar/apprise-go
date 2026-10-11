@@ -10,7 +10,10 @@ import (
 
 func TestProviderTemplateValidation(t *testing.T) {
 	for _, scheme := range []string{"slack", "discord", "guilded"} {
-		for _, payload := range []string{`{}`, `{"attachments":[{}]}`, `{"content":42,"embeds":["bad"]}`, `{"blocks":[{}]}`} {
+		for _, payload := range []string{
+			`{}`, `{"attachments":[{}]}`, `{"content":42,"embeds":["bad"]}`, `{"blocks":[{}]}`,
+			`{"content":"hello","embeds":"bad"}`, `{"content":"hello","embeds":{}}`, `{"content":"hello","embeds":null}`,
+		} {
 			t.Run(scheme+"/invalid/"+payload, func(t *testing.T) {
 				path := filepath.Join(t.TempDir(), "template.json")
 				if err := os.WriteFile(path, []byte(payload), 0600); err != nil {
@@ -72,7 +75,7 @@ func TestProviderTemplateValidation(t *testing.T) {
 }
 
 func TestMailerSendCopyRecipientsAndReply(t *testing.T) {
-	parsed, err := ParseURL("mailersend://token:user@example.com?cc=bad,copy@example.com&bcc=bad,blind@example.com&reply=user@example.com")
+	parsed, err := ParseURL("mailersend://token:user@example.com?cc=bad,<copy@example.com>,<user@example.com>&bcc=bad,<blind@example.com>&reply=Reply%20Name%20%3Cuser@example.com%3E")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +101,12 @@ func TestMailerSendCopyRecipientsAndReply(t *testing.T) {
 		if len(payload[key].([]any)) != 1 {
 			t.Fatalf("valid %s recipient missing", key)
 		}
+	}
+	if payload["cc"].([]any)[0].(map[string]any)["email"] != "copy@example.com" {
+		t.Fatal("copy recipient was not normalized")
+	}
+	if payload["bcc"].([]any)[0].(map[string]any)["email"] != "blind@example.com" {
+		t.Fatal("blind copy recipient was not normalized")
 	}
 }
 

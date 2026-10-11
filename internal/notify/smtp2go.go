@@ -277,11 +277,18 @@ func isSimpleEmail(value string) bool {
 // accepts, including the "Display Name <addr@host>" form that appears in
 // reply-to and from arguments.
 func isEmailAddress(value string) bool {
+	_, ok := normalizedEmailAddress(value)
+	return ok
+}
+
+// normalizedEmailAddress returns the addr@host portion accepted by the
+// existing validator, so APIs expecting an email field never receive brackets.
+func normalizedEmailAddress(value string) (string, bool) {
 	value = strings.TrimSpace(value)
 	if open := strings.LastIndex(value, "<"); open != -1 && strings.HasSuffix(value, ">") {
 		value = strings.TrimSpace(value[open+1 : len(value)-1])
 	}
-	return isSimpleEmail(value)
+	return value, isSimpleEmail(value)
 }
 
 // Copy recipients are optional: upstream drops malformed addresses instead of
@@ -289,8 +296,8 @@ func isEmailAddress(value string) bool {
 func validEmailRecipients(raw string) []string {
 	var recipients []string
 	for _, entry := range parseDelimitedList(raw) {
-		if isEmailAddress(entry) {
-			recipients = append(recipients, entry)
+		if address, ok := normalizedEmailAddress(entry); ok {
+			recipients = append(recipients, address)
 		}
 	}
 	return recipients

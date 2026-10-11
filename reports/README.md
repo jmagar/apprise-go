@@ -30,3 +30,8 @@ compared. The receiver is checked against upstream cryptographic vectors and
 rejects corrupted signatures, MACs, recipients, and missing shared room keys.
 The disposable receiver's keys are fixed; sender keys and ciphertext remain
 random. Request and golden assertions are preserved.
+
+Go rejects a webhook template's present `embeds` field unless it is an array,
+including when `content` is present. Python Apprise 1.13.1 still accepts those
+malformed fields. Valid templates and templates rejected by both implementations
+retain full request sequence comparisons.

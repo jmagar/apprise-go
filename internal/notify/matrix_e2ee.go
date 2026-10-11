@@ -41,15 +41,11 @@ type matrixDeviceKeys struct {
 // e2eeAccount loads the stored Olm account or creates one, uploading its keys
 // when the server has not seen them for this device identity.
 func (m *MatrixTarget) e2eeAccount() (*matrixolm.Account, error) {
-	if m.olmAccount != nil {
-		return m.olmAccount, nil
-	}
-
 	var stored struct {
 		Identity []byte `json:"identity"`
 		Signing  []byte `json:"signing"`
 	}
-	if storeGetJSON(m.store, "e2ee_account", &stored) && len(stored.Identity) > 0 {
+	if m.olmAccount == nil && storeGetJSON(m.store, "e2ee_account", &stored) && len(stored.Identity) > 0 {
 		if account, err := matrixolm.NewAccountFromKeys(stored.Identity, stored.Signing); err == nil {
 			m.olmAccount = account
 		}

@@ -258,9 +258,12 @@ func (m *MatrixTarget) sendServer(body, title string, notifyType NotifyType, att
 			return nil
 		}
 	}
-	if m.secure && m.e2ee {
+	// Upstream falls back to plaintext for this send when key setup fails;
+	// keep the configured flag so later sends can retry encryption setup.
+	e2eeCapable := m.secure && m.e2ee
+	if e2eeCapable {
 		if _, err := m.e2eeAccount(); err != nil {
-			return err
+			e2eeCapable = false
 		}
 	}
 
@@ -280,7 +283,7 @@ func (m *MatrixTarget) sendServer(body, title string, notifyType NotifyType, att
 
 		// Only an encrypted room gets encrypted traffic; anywhere else the
 		// plaintext path is what upstream uses too.
-		if m.secure && m.e2ee && m.roomEncrypted(roomID) {
+		if e2eeCapable && m.roomEncrypted(roomID) {
 			if err := m.sendEncrypted(roomID, body, title); err != nil {
 				outcome.record(err)
 				continue

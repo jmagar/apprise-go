@@ -1,9 +1,12 @@
 package parity
 
 import (
+	"encoding/json"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/unraid/apprise-go/internal/notify"
@@ -21,6 +24,7 @@ func TestProviderRegressionRequestParity(t *testing.T) {
 		{"mailersend/copy-and-reply", "mailersend://apikey123:user@example.com?cc=bad,copy@example.com&bcc=bad,blind@example.com&reply=user@example.com"},
 		{"mailersend/bracketed-copies", "mailersend://apikey123:user@example.com/one@example.com/two@example.com?cc=bad,%3Ccopy@example.com%3E,%3Cone@example.com%3E&bcc=bad,%3Cblind@example.com%3E&reply=Reply%20Name%20%3Cuser@example.com%3E"},
 		{"postmark/bracketed-copies", "postmark://apikey123:sender@example.com/one@example.com/two@example.com?cc=bad,%3Cone@example.com%3E&bcc=bad,%3Cblind@example.com%3E"},
+		{"postmark/copy-exclusions", "postmark://apikey123:sender@example.com/one@example.com/two@example.com?cc=bad,%3Ccopy@example.com%3E,%3Cone@example.com%3E,%3Cblind@example.com%3E&bcc=bad,%3Cblind@example.com%3E,%3Ctwo@example.com%3E"},
 		{"postmark/blind-copy-exclusions", "postmark://apikey123:sender@example.com/one@example.com?cc=bad,%3Cblind@example.com%3E,%3Cone@example.com%3E&bcc=bad,%3Cone@example.com%3E"},
 		{"kook/empty-required", "kook://bottoken123?optional=no"},
 		{"kook/empty-optional", "kook://bottoken123?optional=yes"},
@@ -70,7 +74,45 @@ func TestProviderRegressionRequestParity(t *testing.T) {
 				t.Fatal("Python capture omitted the delivery outcome")
 			}
 			assertNotifySuccessMatches(t, pythonSuccess, err)
+			if tt.name == "postmark/copy-exclusions" {
+				normalizePostmarkCopyOrder(t, pythonSpecs)
+				normalizePostmarkCopyOrder(t, goSpecs)
+			}
 			assertRequestSpecSequenceMatches(t, pythonSpecs, goSpecs)
 		})
+	}
+}
+
+// Python Postmark serializes Cc/Bcc sets in arbitrary order. Sort only those
+// captured lists; retain every address and duplicate, and compare all other data.
+func normalizePostmarkCopyOrder(t *testing.T, specs []notify.RequestSpec) {
+	t.Helper()
+	for i := range specs {
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(specs[i].Body), &payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range []string{"Cc", "Bcc"} {
+			raw, exists := payload[field]
+			if !exists {
+				continue
+			}
+			var list string
+			if err := json.Unmarshal(raw, &list); err != nil {
+				t.Fatal(err)
+			}
+			addresses := strings.Split(list, ",")
+			slices.Sort(addresses)
+			data, err := json.Marshal(strings.Join(addresses, ","))
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload[field] = data
+		}
+		data, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		specs[i].Body = string(data)
 	}
 }

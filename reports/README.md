@@ -17,6 +17,9 @@ GOCACHE=$PWD/.gocache go run ./internal/tools/parity_report \
 These files are generated artifacts; check them in only when you want a
 snapshot tied to a specific commit.
 
+The CI parity script compares schema metadata against the running platform,
+including the macOS notifier's capability flag.
+
 The CI parity script also runs the expanded schema exercise group:
 
 ```sh

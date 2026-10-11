@@ -154,6 +154,14 @@ func NewMatrixTarget(target *ParsedURL) (*MatrixTarget, error) {
 		discovery = false
 	}
 
+	// Upstream derives storage identity from the resolved credentials, including
+	// token= and the token-only user form. Do not share cached account/room state
+	// between tokens that are absent from the original URL's password field.
+	storeTarget := *target
+	storeTarget.Host = host
+	storeTarget.User, storeTarget.HasUser = user, user != ""
+	storeTarget.Password, storeTarget.HasPassword = password, password != ""
+
 	matrixTarget := &MatrixTarget{
 		host:          host,
 		port:          target.Port,
@@ -172,7 +180,7 @@ func NewMatrixTarget(target *ParsedURL) (*MatrixTarget, error) {
 		// Upstream defaults end-to-end encryption on; it only takes effect
 		// for rooms the server reports as encrypted.
 		e2ee:  parseBoolWithDefault(target.Query["e2ee"], true),
-		store: StoreFor(target),
+		store: StoreFor(&storeTarget),
 		hsreq: parseBoolWithDefault(target.Query["hsreq"], true),
 		webhookPath: func() string {
 			if raw := strings.TrimSpace(target.Query["path"]); raw != "" {
@@ -708,29 +716,48 @@ func (m *MatrixTarget) roomJoin(room string) string {
 		return ""
 	}
 
-	if id, ok := m.normalizeRoomID(room); ok {
-		ok, response, _ := m.fetch("/join/"+url.PathEscape(id), map[string]any{}, nil, http.MethodPost, "")
-		if ok {
-			if joinedID, _ := response["room_id"].(string); joinedID != "" {
-				return joinedID
-			}
-			return id
+	identifier, isID := m.normalizeRoomID(room)
+	if !isID {
+		var ok bool
+		identifier, ok = m.normalizeRoomAlias(room)
+		if !ok {
+			return ""
 		}
-		return ""
 	}
 
-	alias, ok := m.normalizeRoomAlias(room)
+	// Upstream retains successful joins in the provider Store. Include the
+	// homeserver in the cache key even when hsreq=no leaves it out of the URL.
+	cacheKey := identifier
+	homeServer := m.homeServer
+	if _, explicitHomeServer, ok := strings.Cut(identifier, ":"); ok {
+		homeServer = explicitHomeServer
+	} else if homeServer != "" {
+		cacheKey += ":" + homeServer
+	} else {
+		cacheKey += ":None"
+	}
+	var mapping struct {
+		ID         string `json:"id"`
+		HomeServer string `json:"home_server"`
+	}
+	if storeGetJSON(m.store, cacheKey, &mapping) && mapping.ID != "" {
+		return mapping.ID
+	}
+
+	ok, response, _ := m.fetch("/join/"+url.PathEscape(identifier), map[string]any{}, nil, http.MethodPost, "")
 	if !ok {
 		return ""
 	}
-	ok, response, _ := m.fetch("/join/"+url.PathEscape(alias), map[string]any{}, nil, http.MethodPost, "")
-	if !ok {
-		return ""
+	mapping.ID, _ = response["room_id"].(string)
+	if mapping.ID == "" {
+		if !isID {
+			return ""
+		}
+		mapping.ID = identifier
 	}
-	if roomID, ok := response["room_id"].(string); ok && roomID != "" {
-		return roomID
-	}
-	return ""
+	mapping.HomeServer = homeServer
+	_ = m.store.Set(cacheKey, mapping, 0)
+	return mapping.ID
 }
 
 func (m *MatrixTarget) sendImage(roomID, title string, notifyType NotifyType) bool {

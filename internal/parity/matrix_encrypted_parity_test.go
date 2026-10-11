@@ -25,9 +25,8 @@ func TestMatrixEncryptedRequestParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			goSpecs, err := testutil.CaptureGoRequestsResult(t, func() error {
-				if err := notify.StoreFor(parsed).Clear(); err != nil {
-					return err
-				}
+				// The Python capture has a fresh per-instance memory store.
+				parsed.Query["store"] = "no"
 				target, err := notify.NewMatrixTarget(parsed)
 				if err != nil {
 					return err

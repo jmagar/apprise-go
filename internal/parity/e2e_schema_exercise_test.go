@@ -110,9 +110,11 @@ func TestE2ERequestParitySchemaExercise(t *testing.T) {
 				t.Fatalf("parse url: %v", err)
 			}
 			goSpecs, err := testutil.CaptureGoRequestsResult(t, func() error {
-				// Python runs each case in a fresh process. Reset this URL's
-				// state inside the capture lock before construction and dispatch.
-				if err := notify.StoreFor(parsedURL).Clear(); err != nil {
+				// Python runs each case in a fresh process. Keep Matrix's store
+				// per-instance; retain the existing reset for other providers.
+				if provider == "matrix" {
+					parsedURL.Query["store"] = "no"
+				} else if err := notify.StoreFor(parsedURL).Clear(); err != nil {
 					return err
 				}
 				target, err := notify.NewTarget(parsedURL)

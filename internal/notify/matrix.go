@@ -240,12 +240,27 @@ func (m *MatrixTarget) sendServer(body, title string, notifyType NotifyType, att
 			}
 		}
 	}
+	if m.userID == "" {
+		ok, response, _ := m.fetch("/account/whoami", nil, nil, http.MethodGet, "")
+		if ok {
+			m.userID, _ = response["user_id"].(string)
+			m.deviceID, _ = response["device_id"].(string)
+		}
+	}
+	if m.homeServer == "" {
+		m.homeServer = m.host
+	}
 
 	rooms := m.rooms
 	if len(rooms) == 0 {
 		rooms = m.joinedRooms()
 		if len(rooms) == 0 {
 			return nil
+		}
+	}
+	if m.secure && m.e2ee {
+		if _, err := m.e2eeAccount(); err != nil {
+			return err
 		}
 	}
 
@@ -263,16 +278,9 @@ func (m *MatrixTarget) sendServer(body, title string, notifyType NotifyType, att
 			continue
 		}
 
-		if m.includeImage && m.version == matrixVersionV2 {
-			if ok := m.sendImage(roomID, title, notifyType); !ok {
-				outcome.record(fmt.Errorf("matrix image send failed"))
-				continue
-			}
-		}
-
 		// Only an encrypted room gets encrypted traffic; anywhere else the
 		// plaintext path is what upstream uses too.
-		if m.e2ee && m.version == matrixVersionV3 && m.roomEncrypted(roomID) {
+		if m.secure && m.e2ee && m.roomEncrypted(roomID) {
 			if err := m.sendEncrypted(roomID, body, title); err != nil {
 				outcome.record(err)
 				continue
@@ -287,6 +295,12 @@ func (m *MatrixTarget) sendServer(body, title string, notifyType NotifyType, att
 			continue
 		}
 
+		if m.includeImage && m.version == matrixVersionV2 {
+			if ok := m.sendImage(roomID, title, notifyType); !ok {
+				outcome.record(fmt.Errorf("matrix image send failed"))
+				continue
+			}
+		}
 		if len(attachments) > 0 && !uploadsDone {
 			var err error
 			uploaded, err = m.uploadAttachments(attachments)
@@ -416,7 +430,7 @@ func (m *MatrixTarget) uploadFetch(attachment Attachment, params url.Values) (bo
 // the first event is dropped. The spec asks for an id unique across requests
 // sharing an access token, so this advances per event rather than per room.
 func (m *MatrixTarget) advanceMessageTransaction() {
-	if m.version != matrixVersionV3 || m.accessToken == "" {
+	if m.accessToken == "" {
 		return
 	}
 
@@ -607,9 +621,10 @@ func (m *MatrixTarget) login() bool {
 		}
 	} else {
 		payload = map[string]any{
-			"type":     "m.login.password",
-			"user":     m.user,
-			"password": m.password,
+			"type":                        "m.login.password",
+			"user":                        m.user,
+			"password":                    m.password,
+			"initial_device_display_name": matrixDefaultUserAgent,
 		}
 	}
 
@@ -691,8 +706,11 @@ func (m *MatrixTarget) roomJoin(room string) string {
 	}
 
 	if id, ok := m.normalizeRoomID(room); ok {
-		ok, _, _ := m.fetch("/join/"+url.PathEscape(id), map[string]any{}, nil, http.MethodPost, "")
+		ok, response, _ := m.fetch("/join/"+url.PathEscape(id), map[string]any{}, nil, http.MethodPost, "")
 		if ok {
+			if joinedID, _ := response["room_id"].(string); joinedID != "" {
+				return joinedID
+			}
 			return id
 		}
 		return ""
@@ -721,8 +739,11 @@ func (m *MatrixTarget) sendImage(roomID, title string, notifyType NotifyType) bo
 	if payload["body"] == "" {
 		payload["body"] = string(notifyType)
 	}
-	path := fmt.Sprintf("/rooms/%s/send/m.room.message", url.PathEscape(roomID))
-	ok, _, _ := m.fetch(path, payload, nil, http.MethodPost, "")
+	path := m.messagePath(roomID)
+	ok, _, _ := m.fetch(path, payload, nil, m.messageMethod(), "")
+	if ok {
+		m.advanceMessageTransaction()
+	}
 	return ok
 }
 
@@ -751,22 +772,12 @@ func (m *MatrixTarget) sendMessage(roomID, body, title string, notifyType Notify
 }
 
 func (m *MatrixTarget) messagePath(roomID string) string {
-	escapedRoom := url.PathEscape(roomID)
-	if m.version == matrixVersionV3 {
-		transaction := m.transactionIDString
-		if transaction == "" {
-			transaction = fmt.Sprintf("%d", m.transactionID)
-		}
-		return fmt.Sprintf("/rooms/%s/send/m.room.message/%s", escapedRoom, url.PathEscape(transaction))
-	}
-	return fmt.Sprintf("/rooms/%s/send/m.room.message", escapedRoom)
+	transaction := m.transactionValue()
+	return fmt.Sprintf("/rooms/%s/send/m.room.message/%s", url.PathEscape(roomID), url.PathEscape(transaction))
 }
 
 func (m *MatrixTarget) messageMethod() string {
-	if m.version == matrixVersionV3 {
-		return http.MethodPut
-	}
-	return http.MethodPost
+	return http.MethodPut
 }
 
 func (m *MatrixTarget) normalizeRoomID(room string) (string, bool) {

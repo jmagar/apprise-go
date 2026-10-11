@@ -86,8 +86,8 @@ func NewPostmarkTarget(target *ParsedURL) (*PostmarkTarget, error) {
 		fromEmail: fromEmail,
 		fromName:  strings.TrimSpace(target.Query["name"]),
 		targets:   targets,
-		cc:        parseDelimitedList(target.Query["cc"]),
-		bcc:       parseDelimitedList(target.Query["bcc"]),
+		cc:        validEmailRecipients(target.Query["cc"]),
+		bcc:       validEmailRecipients(target.Query["bcc"]),
 		format:    format,
 	}, nil
 }

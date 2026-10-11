@@ -16,3 +16,17 @@ GOCACHE=$PWD/.gocache go run ./internal/tools/parity_report \
 
 These files are generated artifacts; check them in only when you want a
 snapshot tied to a specific commit.
+
+The CI parity script also runs the expanded schema exercise group:
+
+```sh
+go test ./internal/parity -tags=e2e -run '^TestE2E' -count=1 -timeout=30m
+```
+
+Each Python request capture has a 30-second deadline. Aggregate golden checks
+use the enclosing test's deadline. Matrix encrypted requests are authenticated
+and decrypted by an independent receiver before their recovered events are
+compared. The receiver is checked against upstream cryptographic vectors and
+rejects corrupted signatures, MACs, recipients, and missing shared room keys.
+The disposable receiver's keys are fixed; sender keys and ciphertext remain
+random. Request and golden assertions are preserved.

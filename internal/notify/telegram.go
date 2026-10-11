@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"html"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/unraid/apprise-go/assets"
 )
 
 const telegramAPIBase = "https://api.telegram.org/bot"
@@ -181,7 +185,7 @@ func (t *TelegramTarget) SendWithAttachments(body, title string, notifyType Noti
 
 	for _, recipient := range t.targets {
 		if t.includeImage {
-			spec, err := t.buildImageSpec(recipient)
+			spec, err := t.buildImageSpec(recipient, notifyType)
 			if err != nil {
 				return err
 			}
@@ -383,8 +387,8 @@ func (t *TelegramTarget) buildDetectSpec() RequestSpec {
 	}
 }
 
-func (t *TelegramTarget) buildImageSpec(recipient telegramRecipient) (RequestSpec, error) {
-	values := url.Values{}
+func (t *TelegramTarget) buildImageSpec(recipient telegramRecipient, notifyType NotifyType) (RequestSpec, error) {
+	values := formFields{}
 	if recipient.isNumeric {
 		values.Set("chat_id", strconv.FormatInt(recipient.chatIDInt, 10))
 	} else {
@@ -393,15 +397,36 @@ func (t *TelegramTarget) buildImageSpec(recipient telegramRecipient) (RequestSpe
 	if recipient.messageTopic > 0 {
 		values.Set("message_thread_id", strconv.Itoa(recipient.messageTopic))
 	}
+	imageType, ok := ParseNotifyType(string(notifyType))
+	if !ok {
+		return RequestSpec{}, fmt.Errorf("unsupported telegram notification image type")
+	}
+	name := fmt.Sprintf("apprise-%s-256x256.png", imageType)
+	var data []byte
+	var err error
+	if root := strings.TrimSpace(os.Getenv("APPRISE_ASSET_ROOT")); root != "" {
+		mask := joinAssetMask(root)
+		path := strings.NewReplacer("{THEME}", "default", "{TYPE}", string(imageType), "{XY}", "256x256", "{EXTENSION}", ".png").Replace(mask)
+		data, err = os.ReadFile(path) // #nosec G304 -- configured asset root; the icon type and filename are validated constants
+	} else {
+		data, err = assets.NotificationImages.ReadFile(filepath.ToSlash(filepath.Join("themes", "default", name)))
+	}
+	if err != nil {
+		return RequestSpec{}, fmt.Errorf("telegram notification image: %w", err)
+	}
+	body, contentType, err := singleFileAttachmentBody(values, "photo", Attachment{Name: name, MIMEType: "image/png", Data: data}, false)
+	if err != nil {
+		return RequestSpec{}, err
+	}
 
 	return RequestSpec{
 		Method: "POST",
 		URL:    telegramAPIBase + t.botToken + "/SendPhoto",
 		Headers: map[string]string{
 			"User-Agent":   "Apprise",
-			"Content-Type": "application/x-www-form-urlencoded",
+			"Content-Type": contentType,
 		},
-		Body: values.Encode(),
+		Body: body,
 	}, nil
 }
 

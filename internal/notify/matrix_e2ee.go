@@ -3,6 +3,7 @@ package notify
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -30,7 +31,7 @@ const matrixE2EECacheTTL = 7 * 24 * time.Hour
 
 // matrixOneTimeKeyCount is how many one-time keys are published per upload;
 // each is consumed by one recipient device starting a session with us.
-const matrixOneTimeKeyCount = 50
+const matrixOneTimeKeyCount = 10
 
 type matrixDeviceKeys struct {
 	Curve25519 string
@@ -98,16 +99,51 @@ func (m *MatrixTarget) uploadDeviceKeys(binding string) error {
 	if err != nil {
 		return err
 	}
+	fallbackKeys, err := m.fallbackKeys()
+	if err != nil {
+		return err
+	}
 
 	ok, _, _ := m.fetch("/keys/upload", map[string]any{
 		"device_keys":   deviceKeys,
 		"one_time_keys": oneTimeKeys,
+		"fallback_keys": fallbackKeys,
 	}, nil, http.MethodPost, "")
 	if !ok {
 		return fmt.Errorf("matrix e2ee: device key upload failed")
 	}
 
 	return m.store.Set("e2ee_device_binding", binding, matrixE2EECacheTTL)
+}
+
+func (m *MatrixTarget) fallbackKeys() (map[string]any, error) {
+	var saved struct {
+		Identity string `json:"identity"`
+		Private  []byte `json:"private"`
+	}
+	var key *ecdh.PrivateKey
+	if storeGetJSON(m.store, "e2ee_fallback_key", &saved) && saved.Identity == m.olmAccount.IdentityKey() {
+		key, _ = ecdh.X25519().NewPrivateKey(saved.Private)
+	}
+	if key == nil {
+		var err error
+		key, err = ecdh.X25519().GenerateKey(rand.Reader)
+		if err != nil {
+			return nil, err
+		}
+		saved.Identity, saved.Private = m.olmAccount.IdentityKey(), key.Bytes()
+		if err := m.store.Set("e2ee_fallback_key", saved, matrixE2EECacheTTL); err != nil {
+			return nil, err
+		}
+	}
+	object := map[string]any{"key": matrixolm.EncodeBase64(key.PublicKey().Bytes()), "fallback": true}
+	canonical, err := matrixolm.CanonicalJSON(object)
+	if err != nil {
+		return nil, err
+	}
+	object["signatures"] = map[string]any{m.userID: map[string]any{"ed25519:" + m.deviceID: m.olmAccount.Sign(canonical)}}
+	id := sha256.Sum256(key.PublicKey().Bytes())
+	return map[string]any{fmt.Sprintf("signed_curve25519:%x", id[:5]): object}, nil
 }
 
 // roomEncrypted reports whether the server says the room is encrypted. The
@@ -290,13 +326,14 @@ func (m *MatrixTarget) shareRoomKey(roomID string, session *matrixolm.MegolmSess
 		return nil
 	}
 
+	if m.accessToken != m.password {
+		m.advanceTransaction()
+	}
 	path := fmt.Sprintf("/sendToDevice/m.room.encrypted/%s", url.PathEscape(m.transactionValue()))
 	ok, _, _ = m.fetch(path, map[string]any{"messages": messages}, nil, http.MethodPut, "")
 	if !ok {
 		return fmt.Errorf("matrix e2ee: could not deliver room key")
 	}
-	m.advanceTransaction()
-
 	return nil
 }
 

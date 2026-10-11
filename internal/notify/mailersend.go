@@ -17,6 +17,7 @@ const (
 type MailerSendTarget struct {
 	apikey    string
 	fromEmail string
+	replyTo   string
 	targets   []string
 	cc        []string
 	bcc       []string
@@ -64,9 +65,10 @@ func NewMailerSendTarget(target *ParsedURL) (*MailerSendTarget, error) {
 	return &MailerSendTarget{
 		apikey:    apikey,
 		fromEmail: fromEmail,
+		replyTo:   strings.TrimSpace(target.Query["reply"]),
 		targets:   targets,
-		cc:        parseDelimitedList(target.Query["cc"]),
-		bcc:       parseDelimitedList(target.Query["bcc"]),
+		cc:        validEmailRecipients(target.Query["cc"]),
+		bcc:       validEmailRecipients(target.Query["bcc"]),
 		format:    format,
 	}, nil
 }
@@ -136,6 +138,9 @@ func (m *MailerSendTarget) buildRequests(body, title string, notifyType NotifyTy
 			"from":    map[string]any{"email": m.fromEmail},
 			"to":      []any{map[string]any{"email": recipient}},
 			"subject": subject,
+		}
+		if m.replyTo != "" {
+			payload["reply_to"] = map[string]any{"email": m.replyTo}
 		}
 
 		if len(attachments) > 0 {

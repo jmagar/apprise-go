@@ -284,6 +284,18 @@ func isEmailAddress(value string) bool {
 	return isSimpleEmail(value)
 }
 
+// Copy recipients are optional: upstream drops malformed addresses instead of
+// sending them to the provider or rejecting the whole notification.
+func validEmailRecipients(raw string) []string {
+	var recipients []string
+	for _, entry := range parseDelimitedList(raw) {
+		if isEmailAddress(entry) {
+			recipients = append(recipients, entry)
+		}
+	}
+	return recipients
+}
+
 func init() {
 	RegisterSchemaEntryOrdered(18, SchemaEntry{
 		"attachment_support": true,
